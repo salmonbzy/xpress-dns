@@ -80,7 +80,7 @@ int xdp_dns(struct xdp_md *ctx)
     #ifdef BCC_SEC
     char dns_buffer[512];
     #endif
-   
+
     void *data_end = (void *)(unsigned long)ctx->data_end;
     void *data = (void *)(unsigned long)ctx->data;
 
@@ -114,10 +114,10 @@ int xdp_dns(struct xdp_md *ctx)
         //Check if dest port equals 53
         if (udp->dest == bpf_htons(53))
         {
-            #ifdef DEBUG
-            bpf_printk("Packet dest port 53");
-            bpf_printk("Data pointer starts at %u", data);
-            #endif
+            //#ifdef DEBUG
+            bpf_trace_printk("Packet dest port 53\n", sizeof("Packet dest port 53\n"));
+            //bpf_printk("Data pointer starts at %u", data);
+            //#endif
 
             //Boundary check for minimal DNS header
             if (data + sizeof(*eth) + sizeof(*ip) + sizeof(*udp) + sizeof(struct dns_hdr) > data_end)
@@ -130,9 +130,9 @@ int xdp_dns(struct xdp_md *ctx)
             //Check if header contains a standard query
             if (dns_hdr->qr == 0 && dns_hdr->opcode == 0)
             {
-                #ifdef DEBUG
-                bpf_printk("DNS query transaction id %u", bpf_ntohs(dns_hdr->transaction_id));
-                #endif
+                //#ifdef DEBUG
+                bpf_trace_printk("DNS query transaction id %u\n", sizeof("DNS query transaction id %u\n"), bpf_ntohs(dns_hdr->transaction_id));
+                //#endif
 
                 //Get a pointer to the start of the DNS query
                 void *query_start = (void *)dns_hdr + sizeof(struct dns_hdr);
@@ -153,6 +153,7 @@ int xdp_dns(struct xdp_md *ctx)
                 //If query matches...
                 if (res == 0)
                 {
+                    bpf_trace_printk("Query matches a record\n", sizeof("Query matches a record\n"));
                     size_t buf_size = 0;
 
                     //Change DNS header to a valid response header
@@ -160,7 +161,7 @@ int xdp_dns(struct xdp_md *ctx)
 
                     //Create DNS response and add to temporary buffer.
                     create_query_response(&a_record, &dns_buffer[buf_size], &buf_size);
-    
+
                     #ifdef EDNS
                     //If an additional record is present
                     if(dns_hdr->add_count > 0)
@@ -168,7 +169,7 @@ int xdp_dns(struct xdp_md *ctx)
                         //Parse AR record
                         struct ar_hdr ar;
                         if(parse_ar(ctx, dns_hdr, query_length, &ar) != -1)
-                        {     
+                        {
                             //Create AR response and add to temporary buffer
                             create_ar_response(&ar, &dns_buffer[buf_size], &buf_size);
                         }
@@ -181,11 +182,10 @@ int xdp_dns(struct xdp_md *ctx)
                     int tailadjust = answer_start + buf_size - data_end;
 
                     //Adjust packet length accordingly
-                    if (bpf_xdp_adjust_tail(ctx, tailadjust))
+                    int ret = bpf_xdp_adjust_tail(ctx, tailadjust);
+                    if (ret)
                     {
-                        #ifdef DEBUG
-                        bpf_printk("Adjust tail fail");
-                        #endif
+                        bpf_trace_printk("Adjust tail fail %d\n", sizeof("Adjust tail fail\n"), ret);
                     }
                     else
                     {
@@ -240,11 +240,9 @@ int xdp_dns(struct xdp_md *ctx)
                         //Recalculate IP checksum
                         update_ip_checksum(ip, sizeof(struct iphdr), &ip->check);
 
-                        #ifdef DEBUG
-                        bpf_printk("XDP_TX");
-                        #endif
+                        bpf_trace_printk("XDP_TX\n", sizeof("XDP_TX\n"));
 
-            
+
                         #ifdef DEBUG
                         uint64_t end = bpf_ktime_get_ns();
                         uint64_t elapsed = end-start;
@@ -259,6 +257,7 @@ int xdp_dns(struct xdp_md *ctx)
         }
     }
 
+    bpf_trace_printk("Default action\n", sizeof("Default action\n"));
     return DEFAULT_ACTION;
 }
 
@@ -317,7 +316,7 @@ static int parse_query(struct xdp_md *ctx, void *query_start, struct dns_query *
     for (i = 0; i < MAX_DNS_NAME_LENGTH; i++)
     {
 
-        //Boundary check of cursor. Verifier requires a +1 here. 
+        //Boundary check of cursor. Verifier requires a +1 here.
         //Probably because we are advancing the pointer at the end of the loop
         if (cursor + 1 > data_end)
         {
@@ -409,7 +408,7 @@ static inline int create_ar_response(struct ar_hdr *ar, char *dns_buffer, size_t
     {
         return -1;
     }
-        
+
     return 0;
 }
 #endif
@@ -502,7 +501,7 @@ static inline void copy_to_pkt_buf(struct xdp_md *ctx, void *dst, void *src, siz
             case 16:
                 __builtin_memcpy(cdst, csrc, 16);
                 break;
-            
+
             case 27:
                 __builtin_memcpy(cdst, csrc, 27);
                 break;
